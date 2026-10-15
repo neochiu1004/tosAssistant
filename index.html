@@ -79,7 +79,7 @@ footer { max-width:1200px; margin:20px auto 0; color:var(--muted); font-size:12p
 <header><div class="brand"><div class="logo">✦</div><div><h1>寶藏小助手</h1><div class="subtitle">8 × 8 尋寶機率估算 · 網頁測試版</div></div></div><div class="pill">原版 Rust 邏輯移植 · 本機儲存</div></header>
 <main>
 <section id="setupScreen" class="panel setup">
-<div class="eyebrow">New session</div><h2>設定這局的寶藏數量</h2><p>支援 1×2、1×3、2×2、3×3 四種形狀；長方形可旋轉。開始後可手動記錄遊戲結果，或建立已知寶藏位置來測試推薦準確度。</p>
+<div class="eyebrow">New session</div><h2>設定這局的寶藏數量</h2><p>支援 1×2、1×3、2×2、3×3 四種類型，分別占用 2、3、4、9 格。寶藏可分布於任意格子，不要求相鄰。開始後可手動記錄結果，或設定測試答案來驗證推薦準確度。</p>
 <div class="count-grid" id="countInputs"></div>
 <div class="actions"><button class="primary" id="startAssist">開始輔助</button><button id="startTestSetup">設定寶藏位置並測試</button><button id="loadSave">載入存檔</button></div>
 <div id="setupMessage" class="note">測試模式會先讓你設定真實寶藏位置，正式測試時棋盤會隱藏答案；每次挖掘都會自動對照答案並更新推薦。</div>
@@ -107,28 +107,110 @@ function shapeArea(s){return SHAPES[s][0]*SHAPES[s][1]}
 function positions(shape){const [h,w]=SHAPES[shape], out=[];for(const [hh,ww] of [[h,w],[w,h]])for(let r=0;r<=SIZE-hh;r++)for(let c=0;c<=SIZE-ww;c++){let m=0n;for(let y=r;y<r+hh;y++)for(let x=c;x<c+ww;x++)m|=bit(y*SIZE+x);out.push(m)}return [...new Set(out.map(String))].map(BigInt).sort((a,b)=>a<b?-1:a>b?1:0)}
 function positionsOrientation(shape,orientation){const [h,w]=SHAPES[shape],hh=orientation===0?Math.max(h,w):Math.min(h,w),ww=orientation===0?Math.min(h,w):Math.max(h,w),out=[];for(let r=0;r<=SIZE-hh;r++)for(let c=0;c<=SIZE-ww;c++){let m=0n;for(let y=r;y<r+hh;y++)for(let x=c;x<c+ww;x++)m|=bit(y*SIZE+x);out.push(m)}return out}
 class RNG{constructor(seed){this.x=seed||1n}next(){this.x=BigInt.asUintN(64,this.x^(this.x>>12n));this.x=BigInt.asUintN(64,this.x^(this.x<<25n));this.x=BigInt.asUintN(64,this.x^(this.x>>27n));return BigInt.asUintN(64,this.x*0x2545F4914F6CDD1Dn)}shuffle(a){for(let i=a.length-1;i>0;i--){const j=Number(this.next()%BigInt(i+1));[a[i],a[j]]=[a[j],a[i]]}}}
-function sampleBoard(all,remaining,blocked,rng,orientationCounts){const domains=[];for(let s=0;s<4;s++){if(!remaining[s])continue;if(s<2&&orientationCounts&&orientationCounts[s]){for(let o=0;o<2;o++){const count=orientationCounts[s][o];if(!count)continue;const candidates=positionsOrientation(s,o).filter(m=>(m&blocked)===0n);if(candidates.length<count)return null;rng.shuffle(candidates);domains.push({candidates,count,area:shapeArea(s)})}}else{const count=remaining[s];const candidates=all[s].filter(m=>(m&blocked)===0n);if(candidates.length<count)return null;rng.shuffle(candidates);domains.push({candidates,count,area:shapeArea(s)})}}domains.sort((a,b)=>(a.candidates.length/a.count)-(b.candidates.length/b.count)||b.area-a.area);const placed=[];let visited=0;
- function search(index,used){visited++;if(visited>MAX_SEARCH_NODES)return false;if(index===domains.length)return true;return placeSame(index,0,domains[index].count,used)}
- function placeSame(index,start,left,used){visited++;if(visited>MAX_SEARCH_NODES)return false;if(left===0)return search(index+1,used);const arr=domains[index].candidates;for(let i=start;i<=arr.length-left;i++){const m=arr[i];if((m&used)!==0n)continue;placed.push(m);if(placeSame(index,i+1,left-1,used|m))return true;placed.pop()}return false}
- return search(0,blocked)?placed.slice():null}
-function probabilities(remaining,blocked,orientationCounts){const all=SHAPES.map((_,s)=>positions(s)), rng=new RNG(SEED), counts=Array(CELLS).fill(0);let successful=0;for(let n=0;n<SAMPLES;n++){const board=sampleBoard(all,remaining,blocked,rng,orientationCounts);if(!board)continue;successful++;for(let mask of board){while(mask){let low=0;let t=mask;while((t&1n)===0n){t>>=1n;low++}counts[low]++;mask&=mask-1n}}}if(!successful)return null;return counts.map(c=>c/successful)}
+function sampleBoard(all,remaining,blocked,rng){
+    const free=[];
+    for(let i=0;i<CELLS;i++) if(!has(blocked,i)) free.push(i);
+    const required=remaining.reduce((sum,count,shape)=>sum+count*shapeArea(shape),0);
+    if(required>free.length) return null;
+    rng.shuffle(free);
+    const board=[]; let cursor=0;
+    for(let shape=0;shape<SHAPES.length;shape++){
+        for(let n=0;n<remaining[shape];n++){
+            let mask=0n;
+            for(let j=0;j<shapeArea(shape);j++) mask|=bit(free[cursor++]);
+            board.push({shape,mask});
+        }
+    }
+    return board;
+}
+function probabilities(remaining,blocked){
+    const rng=new RNG(SEED), counts=Array(CELLS).fill(0);
+    let successful=0;
+    for(let n=0;n<SAMPLES;n++){
+        const board=sampleBoard(null,remaining,blocked,rng);
+        if(!board) continue;
+        successful++;
+        let occupied=0n;
+        for(const item of board) occupied|=item.mask;
+        for(let i=0;i<CELLS;i++) if(has(occupied,i)) counts[i]++;
+    }
+    if(!successful) return null;
+    return counts.map(c=>c/successful);
+}
 function bestCell(p,blocked){let best=null;for(let i=0;i<CELLS;i++)if(!has(blocked,i)&&(best===null||p[i]>p[best]))best=i;return best}
 function blockedState(s){return s.found.reduce((b,x)=>b|BigInt(x.mask),BigInt(s.misses))}
 function current(){return history[history.length-1]}
 function cloneState(s){return {misses:s.misses,found:s.found.map(x=>({...x})),remaining:s.remaining.slice()}}
-function recompute(){selected=null;placing=null;message='';if(!history.length){probs=null;render();return}const s=current(),orient=[remainingOrientations(0),remainingOrientations(1)];probs=s.remaining.every(n=>n===0)?null:probabilities(s.remaining,blockedState(s),orient);render()}
+function recompute(){
+    selected=null; placing=null; message='';
+    if(!history.length){probs=null;render();return}
+    const s=current();
+    probs=s.remaining.every(n=>n===0)?null:probabilities(s.remaining,blockedState(s));
+    render();
+}
 function pushState(s){history.push(s);recompute()}
 function isAllFound(){return current().remaining.every(n=>n===0)}
 function inferred(){if(!probs)return false;const b=blockedState(current());return probs.every((p,i)=>has(b,i)||p===0||p===1)}
 function finished(){return isAllFound()||inferred()}
-function parseCounts(){const vals=SHAPES.map((_,i)=>Number($(`count${i}`).value));if(vals.some(n=>!Number.isInteger(n)||n<0||!Number.isFinite(n)))throw Error('請為每種寶藏輸入非負整數。');if(vals.every(n=>n===0))throw Error('至少需要一個寶藏。');for(let i=0;i<2;i++){const v=Number($(`vertical${i}`).value),h=Number($(`horizontal${i}`).value);if(!Number.isInteger(v)||!Number.isInteger(h)||v<0||h<0||v+h!==vals[i])throw Error(`${SHAPE_NAMES[i]} 的直向與橫向數量必須相加等於總數 ${vals[i]}。`);orientationConfig[i]=[v,h]}const area=vals.reduce((a,n,i)=>a+n*shapeArea(i),0);if(area>64)throw Error(`寶藏總面積 ${area} 格，超過棋盤 64 格。`);return vals}
+function parseCounts(){
+    const vals=SHAPES.map((_,i)=>Number($(`count${i}`).value));
+    if(vals.some(n=>!Number.isInteger(n)||!Number.isFinite(n)||n<0||n>64))
+        throw Error('每種寶藏的數量必須是 0～64 的整數。');
+    if(vals.every(n=>n===0)) throw Error('至少需要一個寶藏。');
+    const area=vals.reduce((a,n,i)=>a+n*shapeArea(i),0);
+    if(area>CELLS) throw Error(`寶藏總面積 ${area} 格，超過棋盤 ${CELLS} 格。`);
+    return vals;
+}
 function startAssist(){try{const counts=parseCounts();truthSetup=false;mode='assist';history=[];truth=[];testStats={tries:0,hits:0,misses:0,firstHit:null};pushState({misses:0n.toString(),found:[],remaining:counts});if(!probs){history=[];throw Error('找不到合法擺法（放不下或搜尋超過上限）。')} $('setupScreen').classList.add('hidden');$('workspace').classList.remove('hidden');render()}catch(e){$('setupMessage').textContent=e.message}}
 function startTruthSetup(){try{const counts=parseCounts();mode='truthSetup';truthSetup=true;truthCounts=counts.slice();truth=[];history=[];selected=null;placing=null;probs=null;message='先點棋盤上的格子，再選形狀；切換擺放預覽並確認。';$('setupScreen').classList.add('hidden');$('workspace').classList.remove('hidden');render()}catch(e){$('setupMessage').textContent=e.message}}
 function startTestPlay(){const have=[0,0,0,0];truth.forEach(t=>have[t.shape]++);if(have.some((n,i)=>n!==truthCounts[i])){message='請先放好所有設定數量的寶藏。';render();return}mode='test';truthSetup=false;history=[];testStats={tries:0,hits:0,misses:0,firstHit:null};pushState({misses:0n.toString(),found:[],remaining:truthCounts.slice()});if(!probs){history=[];message='這個寶藏配置無法被搜尋器找到，請檢查設定或改一個配置。';mode='truthSetup';truthSetup=true;render();return}message='測試開始：點一個未知格即可模擬挖掘，命中會自動記錄整個寶藏。';render()}
-function selectCell(i){if(mode==='truthSetup'){if(placing){const blocked=truth.reduce((b,t)=>b|t.mask,0n);if(has(blocked,i)){message='這格已被其他寶藏占用。';render();return}const cells=placing.cells;const at=cells.indexOf(i);if(at>=0)cells.splice(at,1);else if(cells.length<shapeArea(placing.shape))cells.push(i);message=`已選 ${cells.length}/${shapeArea(placing.shape)} 格；直接點選棋盤格子來加入或取消。`;render();return}selected=i;message=`已選第 ${Math.floor(i/8)+1} 列、第 ${i%8+1} 行，選擇要放置的寶藏形狀。`;render();return}if(mode==='test'){if(has(blockedState(current()),i)||isAllFound())return;digTest(i);return}if(!history.length||isAllFound()||placing||has(blockedState(current()),i))return;selected=i;message='';render()}
+function selectCell(i){
+    if(mode==='truthSetup'||(placing&&mode==='assist')){
+        const isSetup=mode==='truthSetup';
+        if(placing){
+            const blocked=isSetup?truth.reduce((b,t)=>b|t.mask,0n):blockedState(current());
+            const cells=placing.cells, at=cells.indexOf(i);
+            if(at>=0) cells.splice(at,1);
+            else {
+                if(has(blocked,i)){message='這格已被已知空格或其他寶藏占用，不能選取。';render();return}
+                if(cells.length>=shapeArea(placing.shape)){message=`已選滿 ${shapeArea(placing.shape)} 格，請先取消一格。`;render();return}
+                cells.push(i);
+            }
+            message=`已選 ${cells.length}/${shapeArea(placing.shape)} 格。可直接點擊格子加入或取消。`;render();return;
+        }
+        const blocked=truth.reduce((b,t)=>b|t.mask,0n);
+        if(isSetup&&has(blocked,i)){message='這格已被其他寶藏占用。';render();return}
+        selected=i;message=`已選第 ${Math.floor(i/8)+1} 列、第 ${i%8+1} 行。`;render();return;
+    }
+    if(mode==='test'){if(has(blockedState(current()),i)||isAllFound())return;digTest(i);return}
+    if(!history.length||isAllFound()||placing||has(blockedState(current()),i))return;
+    selected=i;message='';render();
+}
 function availableCandidates(shape,cell,existingBlocked){const candidates=shape<2?remainingOrientations(shape).flatMap((count,o)=>count>0?positionsOrientation(shape,o):[]):positions(shape);return candidates.filter(m=>has(m,cell)&&(m&existingBlocked)===0n)}
-function beginPlace(shape){if(selected===null)return;const isSetup=mode==='truthSetup';const counts=isSetup?truthCounts:current().remaining;if(counts[shape]<=0){message='此形狀已沒有剩餘數量。';render();return}const blocked=isSetup?truth.reduce((b,t)=>b|t.mask,0n):blockedState(current());if(isSetup){if(has(blocked,selected)){message='這格已被其他寶藏占用。';render();return}placing={shape,cells:[selected]};selected=null;message=`直接點選棋盤格子，選滿 ${shapeArea(shape)} 格後按「確認放置」。`;render();return}const c=availableCandidates(shape,selected,blocked);if(!c.length){message='這格放不下此寶藏。';render();return}if(c.length===1){confirmPlacement(shape,c[0]);return}placing={shape,candidates:c,index:0};message='使用 ◀ / ▶ 選擇擺法，確認後記錄。';render()}
-function confirmPlacement(shape,mask){if(mode==='truthSetup'){const cells=placing?.cells||[];if(cells.length!==shapeArea(shape)){message=`${SHAPE_NAMES[shape]} 需要選滿 ${shapeArea(shape)} 格，目前 ${cells.length} 格。`;render();return}mask=cells.reduce((b,i)=>b|bit(i),0n);if(shape<2){const o=foundOrientation({shape,mask:mask.toString()}),used=truth.filter(t=>t.shape===shape&&foundOrientation({shape,mask:t.mask.toString()})===o).length;if(used>=orientationConfig[shape][o]){message=`${SHAPE_NAMES[shape]} 的${o===0?'直向':'橫向'}數量已滿，請調整選取方向。`;render();return}}truth.push({shape,mask});selected=null;placing=null;message=`已放置 ${SHAPE_NAMES[shape]} 寶藏（${cells.length} 格）。`;render();return}const s=cloneState(current());s.found.push({shape,mask:mask.toString()});s.remaining[shape]--;pushState(s)}
+function beginPlace(shape){
+    if(selected===null)return;
+    const isSetup=mode==='truthSetup', counts=isSetup?truthCounts:current().remaining;
+    if(counts[shape]<=0){message='此形狀已沒有剩餘數量。';render();return}
+    const blocked=isSetup?truth.reduce((b,t)=>b|t.mask,0n):blockedState(current());
+    if(has(blocked,selected)){message='這格已被已知空格或其他寶藏占用。';render();return}
+    placing={shape,cells:[selected]};selected=null;
+    message=`請直接選取 ${shapeArea(shape)} 格；不要求相鄰，選滿後按「確認放置」。`;render();
+}
+function confirmPlacement(shape,mask){
+    if(!placing||placing.shape!==shape)return;
+    const cells=placing.cells||[], needed=shapeArea(shape);
+    if(cells.length!==needed){message=`需要選滿 ${needed} 格，目前已選 ${cells.length} 格。`;render();return}
+    mask=cells.reduce((b,i)=>b|bit(i),0n);
+    const blocked=mode==='truthSetup'?truth.reduce((b,t)=>b|t.mask,0n):blockedState(current());
+    if((mask&blocked)!==0n){message='選取格子與已知空格或其他寶藏重疊。';render();return}
+    if(mode==='truthSetup'){
+        truth.push({shape,mask});placing=null;selected=null;message=`已放置 ${SHAPE_NAMES[shape]} 寶藏。`;render();return;
+    }
+    if(mode==='assist'){
+        const s=cloneState(current());s.found.push({shape,mask:mask.toString()});s.remaining[shape]--;
+        placing=null;pushState(s);
+    }
+}
 function markMiss(){if(selected===null||mode!=='assist')return;const s=cloneState(current());s.misses=(BigInt(s.misses)|bit(selected)).toString();pushState(s)}
 function digTest(i){testStats.tries++;let hit=truth.find(t=>has(t.mask,i));if(hit){testStats.hits++;if(testStats.firstHit===null)testStats.firstHit=testStats.tries;const s=cloneState(current());if(!s.found.some(x=>x.mask===hit.mask.toString())){s.found.push({shape:hit.shape,mask:hit.mask.toString()});s.remaining[hit.shape]=Math.max(0,s.remaining[hit.shape]-1)}pushState(s);message=`命中 ${SHAPE_NAMES[hit.shape]}！已自動記錄這個寶藏。`}else{testStats.misses++;const s=cloneState(current());s.misses=(BigInt(s.misses)|bit(i)).toString();pushState(s);message='沒挖到，已記錄為空格。'}render()}
 function undo(){if(mode==='truthSetup'){if(placing){placing=null;render();return}if(truth.length){truth.pop();message='已移除最後放置的寶藏。';render()}return}if(history.length>1){history.pop();if(mode==='test'){// stats are session metrics, recompute approximate from remaining recorded cells
@@ -139,26 +221,75 @@ function save(){const payload={version:1,mode,history,truth:truth.map(t=>({shape
 function load(){try{const raw=localStorage.getItem('treasure-helper-save');if(!raw)throw Error('找不到存檔。');const p=JSON.parse(raw);if(!p.history||!p.history.length)throw Error('存檔內容無效。');history=p.history;mode=p.mode||'assist';truth=(p.truth||[]).map(t=>({shape:t.shape,mask:BigInt(t.mask)}));truthCounts=p.truthCounts||[0,0,0,0];testStats=p.testStats||{tries:0,hits:0,misses:0,firstHit:null};truthSetup=mode==='truthSetup';$('setupScreen').classList.add('hidden');$('workspace').classList.remove('hidden');recompute();message='已載入存檔。';render()}catch(e){$('setupMessage').textContent=e.message}}
 function cellDisplay(i,s,best,previewMask){let cls='cell', text='', fill='#6f7d89';const blocked=BigInt(s.misses)|s.found.reduce((b,t)=>b|BigInt(t.mask),0n);const found=s.found.find(t=>has(BigInt(t.mask),i));if(previewMask!==null&&has(previewMask,i)){cls+=' preview';text=SHAPE_NAMES[placing.shape]}else if(found){cls+=' found';fill=SHAPE_COLORS[found.shape];text=SHAPE_NAMES[found.shape]}else if(has(BigInt(s.misses),i)){cls+=' miss';fill='#303943'}else if(mode==='truthSetup'||(mode==='test'&&$('board').classList.contains('show-truth'))){const t=truth.find(t=>has(t.mask,i));if(t){cls+=' truth';fill=SHAPE_COLORS[t.shape];text=SHAPE_NAMES[t.shape]}}
  if(selected===i)cls+=' selected';if(best===i)cls+=' best';if(!truthSetup&&finished()&&!has(blocked,i)&&probs&&probs[i]===1)cls+=' inferred';if(mode==='test'&&has(blocked,i)){}return {cls,text,fill,blocked}}
-function cellTreasureTypes(i){if(!probs||!history.length)return[];const s=current(),blocked=blockedState(s),out=[];for(let shape=0;shape<4;shape++){if(s.remaining[shape]<=0)continue;const candidates=shape<2?remainingOrientations(shape).flatMap((count,o)=>count>0?positionsOrientation(shape,o):[]):positions(shape);if(candidates.some(m=>has(m,i)&&(m&blocked)===0n))out.push(SHAPE_NAMES[shape])}return out}
-function renderBoard(){const board=$('board');board.innerHTML='';const setup=mode==='truthSetup';let s=history.length?current():{misses:'0',found:[],remaining:truthCounts.slice()};const blocked=setup?truth.reduce((b,t)=>b|t.mask,0n):history.length?blockedState(s):0n;const best=(!setup&&probs&&!finished())?bestCell(probs,blocked):null;const previewMask=placing?(setup?(placing.cells||[]).reduce((b,i)=>b|bit(i),0n):placing.candidates[placing.index]):null;
- for(let i=0;i<64;i++){const d=cellDisplay(i,s,best,previewMask);const btn=document.createElement('button');btn.className=d.cls;btn.style.backgroundColor=d.fill;const types=cellTreasureTypes(i);const chance=probs&&!setup?`${(probs[i]*100).toFixed(1)}%`:'',typeText=types.length?`；可能寶藏：${types.join(' + ')}`:'';btn.title=chance?`估計命中機率 ${chance}${typeText}`:'';btn.setAttribute('aria-label',`第${Math.floor(i/8)+1}列第${i%8+1}行${d.text?`, ${d.text}`:''}${chance?`, 機率 ${chance}${typeText}`:''}`);btn.innerHTML=`<span>${d.text|| (chance?chance:'')}</span><span class="coord">${Math.floor(i/8)+1},${i%8+1}</span>`;if(mode==='test'&&d.blocked){btn.disabled=true;btn.style.opacity='.85'}btn.addEventListener('click',()=>selectCell(i));board.appendChild(btn)} }
+function cellTreasureTypes(i){
+    if(!probs||!history.length)return[];
+    const s=current(), blocked=blockedState(s);
+    if(has(blocked,i)||probs[i]<=0)return[];
+    return SHAPES.map((_,shape)=>shape)
+        .filter(shape=>s.remaining[shape]>0)
+        .map(shape=>SHAPE_NAMES[shape]);
+}
+function renderBoard(){const board=$('board');board.innerHTML='';const setup=mode==='truthSetup';let s=history.length?current():{misses:'0',found:[],remaining:truthCounts.slice()};const blocked=setup?truth.reduce((b,t)=>b|t.mask,0n):history.length?blockedState(s):0n;const best=(!setup&&probs&&!finished())?bestCell(probs,blocked):null;const previewMask=placing?(placing.cells||[]).reduce((b,i)=>b|bit(i),0n):null;
+ for(let i=0;i<64;i++){const d=cellDisplay(i,s,best,previewMask);const btn=document.createElement('button');btn.className=d.cls;btn.style.backgroundColor=d.fill;const types=cellTreasureTypes(i);const chance=probs&&!setup&&!has(blocked,i)?`${(probs[i]*100).toFixed(1)}%`:'',typeText=types.length?`；可能寶藏：${types.join(' + ')}`:'';btn.title=chance?`估計命中機率 ${chance}${typeText}`:'';btn.setAttribute('aria-label',`第${Math.floor(i/8)+1}列第${i%8+1}行${d.text?`, ${d.text}`:''}${chance?`, 機率 ${chance}${typeText}`:''}`);btn.innerHTML=`<span>${d.text|| (chance?chance:'')}</span><span class="coord">${Math.floor(i/8)+1},${i%8+1}</span>`;if(mode==='test'&&d.blocked){btn.disabled=true;btn.style.opacity='.85'}btn.addEventListener('click',()=>selectCell(i));board.appendChild(btn)} }
 function foundOrientation(t){if(t.shape>1)return null;const mask=BigInt(t.mask);const cells=[];for(let i=0;i<CELLS;i++)if(has(mask,i))cells.push(i);return cells.length>1&&cells.every(i=>i%SIZE===cells[0]%SIZE)?0:1}
 function remainingOrientations(shape){const initial=orientationConfig[shape];if(!initial)return null;const found=history.length?current().found:[];let vertical=initial[0],horizontal=initial[1];for(const t of found){if(t.shape!==shape)continue;const o=foundOrientation(t);if(o===0)vertical--;else if(o===1)horizontal--}return [Math.max(0,vertical),Math.max(0,horizontal)]}
-function renderRemaining(){const el=$('remainingList');el.innerHTML='';let rem=truthSetup?truthCounts.map((n,i)=>n-truth.filter(t=>t.shape===i).length):history.length?current().remaining:[0,0,0,0];rem.forEach((n,i)=>{const row=document.createElement('div');row.className='remaining-row';const orient=!truthSetup&&history.length&&i<2?remainingOrientations(i):null;const detail=orient?`<small style="display:block;color:var(--muted);font-weight:500">直 ${orient[0]} · 橫 ${orient[1]}</small>`:'';row.innerHTML=`<span class="shape-name"><i class="shape-dot" style="background:${SHAPE_COLORS[i]}"></i><span>${SHAPE_NAMES[i]}${detail}</span></span><span class="count-tag">${n}</span>`;el.appendChild(row)})}
+function renderRemaining(){
+    const el=$('remainingList');el.innerHTML='';
+    const rem=truthSetup?truthCounts.map((n,i)=>n-truth.filter(t=>t.shape===i).length):history.length?current().remaining:[0,0,0,0];
+    rem.forEach((n,i)=>{
+        const row=document.createElement('div');row.className='remaining-row';
+        row.innerHTML=`<span class="shape-name"><i class="shape-dot" style="background:${SHAPE_COLORS[i]}"></i><span>${SHAPE_NAMES[i]}</span></span><span class="count-tag">${n}</span>`;
+        el.appendChild(row);
+    });
+}
 function renderStatus(){const st=$('status');st.className='status';if(truthSetup){const placed=truth.length,total=truthCounts.reduce((a,b)=>a+b,0);st.textContent=`測試盤設定中：已放置 ${placed}/${total} 個寶藏。答案會在開始測試後隱藏。`;if(placed===total)st.classList.add('good');return}if(!history.length){st.textContent='請開始設定。';return}if(isAllFound()){st.textContent='所有寶藏都找到了。';st.classList.add('good')}else if(!probs){st.textContent='找不到合法盤面（輸入矛盾或搜尋超過上限），請上一步檢查。';st.classList.add('error')}else if(inferred()){st.textContent='已推斷出所有剩餘寶藏位置（綠框），仍可繼續輸入。';st.classList.add('good')}else{const b=bestCell(probs,blockedState(current())),types=cellTreasureTypes(b);st.textContent=`推薦：第 ${Math.floor(b/8)+1} 列、第 ${b%8+1} 行，估計命中機率 ${(probs[b]*100).toFixed(1)}%。可能寶藏：${types.join(' + ')||'無'}。機率為抽樣估計，並非保證命中。`}
  if(message){st.textContent=message;if(/失敗|找不到|不能|請先|沒有可/.test(message))st.classList.add('warn')}}
 function renderMetrics(){const el=$('metrics');el.innerHTML='';if(mode!=='test')return;const data=[['挖掘次數',testStats.tries],['命中寶藏格',testStats.hits],['空格',testStats.misses]];data.forEach(([label,value])=>{const d=document.createElement('div');d.className='metric';d.innerHTML=`<strong>${value}</strong><span>${label}</span>`;el.appendChild(d)});if(testStats.firstHit!==null){const d=document.createElement('div');d.className='metric';d.style.gridColumn='1/-1';d.innerHTML=`<strong>第 ${testStats.firstHit} 次</strong><span>首次命中（本次測試紀錄）</span>`;el.appendChild(d)}}
-function renderInteraction(){const el=$('interactionContent');el.innerHTML='';const add=(tag,txt,cls,fn,disabled=false)=>{const b=document.createElement(tag);b.textContent=txt;b.className=cls||'';b.disabled=disabled;b.addEventListener('click',fn);el.appendChild(b);return b};
- if(truthSetup){if(placing){const needed=shapeArea(placing.shape);const p=document.createElement('p');p.textContent=`${SHAPE_NAMES[placing.shape]}：已選 ${placing.cells.length}/${needed} 格。直接點棋盤格子選取，點已選格可取消。`;el.appendChild(p);add('button',`確認放置 (${placing.cells.length}/${needed})`,'primary',()=>confirmPlacement(placing.shape),placing.cells.length!==needed);add('button','取消','',()=>{placing=null;message='已取消這次放置。';render()});return}
- if(selected!==null){const p=document.createElement('p');p.textContent=`選取：第 ${Math.floor(selected/8)+1} 列、第 ${selected%8+1} 行`;el.appendChild(p);SHAPES.forEach((_,i)=>{const used=truth.filter(t=>t.shape===i).length;add('button',SHAPE_NAMES[i],'small',()=>beginPlace(i),used>=truthCounts[i])})}
- const placed=truthCounts.every((n,i)=>truth.filter(t=>t.shape===i).length===n);add('button','開始測試','primary',startTestPlay,!placed);add('button','移除最後寶藏','',()=>{truth.pop();render()},truth.length===0);return}
- if(mode==='test'){const p=document.createElement('p');p.textContent='點擊任一未知格即可模擬挖掘，網頁會依照你設定的答案自動判斷。';el.appendChild(p);add('button','顯示測試答案','',()=>{const show=$('board').classList.toggle('show-truth');message=show?'測試答案顯示中（只供檢查）。':'已隱藏測試答案。';render()},false);if($('board').classList.contains('show-truth')){truth.forEach(t=>{const p=document.createElement('div');p.style.color=SHAPE_COLORS[t.shape];p.textContent=`${SHAPE_NAMES[t.shape]}：${maskCoords(t.mask)}`;el.appendChild(p)})}return}
- if(selected!==null){const p=document.createElement('p');p.textContent=`選取：第 ${Math.floor(selected/8)+1} 列、第 ${selected%8+1} 行`;el.appendChild(p);add('button','空格','',markMiss,mode!=='assist');SHAPES.forEach((_,i)=>add('button',SHAPE_NAMES[i],'small',()=>beginPlace(i),current().remaining[i]===0))}else{const p=document.createElement('p');p.textContent='點棋盤上的未知格來輸入挖掘結果。';el.appendChild(p)}
- if(placing){el.innerHTML=`<p>${SHAPE_NAMES[placing.shape]} 擺法 ${placing.index+1}/${placing.candidates.length}</p>`;add('button','◀','',()=>{placing.index=(placing.index+placing.candidates.length-1)%placing.candidates.length;render()});add('button','▶','',()=>{placing.index=(placing.index+1)%placing.candidates.length;render()});add('button','確認','primary',()=>confirmPlacement(placing.shape,placing.candidates[placing.index]));add('button','取消','',()=>{placing=null;render()})}}
+function renderInteraction(){
+    const el=$('interactionContent');el.innerHTML='';
+    const add=(tag,txt,cls,fn,disabled=false)=>{const b=document.createElement(tag);b.textContent=txt;b.className=cls||'';b.disabled=disabled;b.addEventListener('click',fn);el.appendChild(b);return b};
+    if(selected!==null&&mode==='assist'&&probs){
+        const i=selected,types=cellTreasureTypes(i),detail=document.createElement('div');
+        detail.className='status';detail.style.marginBottom='12px';
+        detail.innerHTML=`<strong>選取格機率分析</strong><div style="font-size:24px;font-weight:800;margin:6px 0">${(probs[i]*100).toFixed(1)}%</div><div>位置：第 ${Math.floor(i/8)+1} 列、第 ${i%8+1} 行</div><div style="margin-top:5px">可能寶藏：${types.length?types.join('、'):'無'}</div><div style="font-size:12px;color:var(--muted);margin-top:5px">此數值為抽樣估計，不代表保證命中。</div>`;
+        el.appendChild(detail);
+    }
+    if(placing){
+        const needed=shapeArea(placing.shape),p=document.createElement('p');
+        p.textContent=`${SHAPE_NAMES[placing.shape]}：已選 ${placing.cells.length}/${needed} 格。直接點擊棋盤格子加入或取消選取。`;el.appendChild(p);
+        add('button',`確認放置 (${placing.cells.length}/${needed})`,'primary',()=>confirmPlacement(placing.shape),placing.cells.length!==needed);
+        add('button','取消','',()=>{placing=null;message='已取消這次放置。';render()});return;
+    }
+    if(mode==='truthSetup'){
+        if(selected!==null)SHAPES.forEach((_,i)=>add('button',SHAPE_NAMES[i],'small',()=>beginPlace(i),truth.filter(t=>t.shape===i).length>=truthCounts[i]));
+        const placed=truthCounts.every((n,i)=>truth.filter(t=>t.shape===i).length===n);
+        add('button','開始測試','primary',startTestPlay,!placed);
+        add('button','移除最後寶藏','',()=>{truth.pop();render()},truth.length===0);return;
+    }
+    if(mode==='test'){
+        const p=document.createElement('p');p.textContent='點擊任一未知格即可模擬挖掘，網頁會依照設定的答案自動判斷。';el.appendChild(p);
+        add('button','顯示測試答案','',()=>{const show=$('board').classList.toggle('show-truth');message=show?'測試答案顯示中（只供檢查）。':'已隱藏測試答案。';render()});
+        if($('board').classList.contains('show-truth'))truth.forEach(t=>{const p=document.createElement('div');p.style.color=SHAPE_COLORS[t.shape];p.textContent=`${SHAPE_NAMES[t.shape]}：${maskCoords(t.mask)}`;el.appendChild(p)});
+        return;
+    }
+    if(selected!==null){
+        const p=document.createElement('p');p.textContent=`選取：第 ${Math.floor(selected/8)+1} 列、第 ${selected%8+1} 行`;el.appendChild(p);
+        add('button','空格','',markMiss);
+        SHAPES.forEach((_,i)=>add('button',SHAPE_NAMES[i],'small',()=>beginPlace(i),current().remaining[i]===0));
+    }else{const p=document.createElement('p');p.textContent='點選任意未知格，可查看該格機率，再記錄挖掘結果。';el.appendChild(p)}
+}
 function maskCoords(mask){const a=[];for(let i=0;i<64;i++)if(has(mask,i))a.push(`${Math.floor(i/8)+1},${i%8+1}`);return a.join('、')}
 function render(){const setup=mode==='setup';$('setupScreen').classList.toggle('hidden',!setup);$('workspace').classList.toggle('hidden',setup);if(setup)return;$('modeEyebrow').textContent=mode==='truthSetup'?'Test setup':mode==='test'?'Simulation test':'Assistant mode';$('boardTitle').textContent=mode==='truthSetup'?'設定真實寶藏位置':mode==='test'?'尋寶測試棋盤':'尋寶棋盤';$('boardHint').textContent=mode==='truthSetup'?'依照你設定的數量，逐一放置寶藏。開始測試後會隱藏答案。':mode==='test'?'點選未知格模擬挖掘；命中會自動記錄，空格也會回饋給推薦演算法。':'點選格子，再記錄空格或找到的寶藏；紅框是推薦位置。';$('undoBtn').disabled=mode==='truthSetup'?truth.length===0:history.length<=1;$('saveBtn').disabled=mode==='truthSetup'&&truth.length===0;renderBoard();renderRemaining();renderStatus();renderMetrics();renderInteraction();}
 function syncOrientation(shape,changed){const total=Number($(`count${shape}`).value)||0,v=$(`vertical${shape}`),h=$(`horizontal${shape}`);if(changed==='total'){v.value=Math.min(Number(v.value)||0,total);h.value=total-Number(v.value)}else if(changed==='vertical'){v.value=Math.max(0,Math.min(total,Number(v.value)||0));h.value=total-Number(v.value)}else{h.value=Math.max(0,Math.min(total,Number(h.value)||0));v.value=total-Number(h.value)}}
-function renderCountInputs(){const el=$('countInputs');SHAPE_NAMES.forEach((name,i)=>{const div=document.createElement('div');div.className='count-card';const total=i===0?3:i===1?2:i===2?1:1;div.innerHTML=`<div style="min-width:0;flex:1"><div class="shape-name"><i class="shape-dot" style="background:${SHAPE_COLORS[i]}"></i>${name} 總數</div><input type="number" min="0" max="64" step="1" id="count${i}" value="${total}" aria-label="${name}寶藏總數">${i<2?`<div style="display:flex;gap:8px;align-items:center;margin-top:8px;flex-wrap:wrap"><label style="font-size:12px;color:var(--muted)">直 <input type="number" min="0" max="64" step="1" id="vertical${i}" value="${i===0?2:1}" style="width:54px;padding:5px"></label><label style="font-size:12px;color:var(--muted)">橫 <input type="number" min="0" max="64" step="1" id="horizontal${i}" value="1" style="width:54px;padding:5px"></label><span style="font-size:11px;color:var(--muted)">直＋橫＝總數</span></div>`:''}</div>`;el.appendChild(div);$(`count${i}`).addEventListener('input',()=>{if(i<2)syncOrientation(i,'total')});if(i<2){$(`vertical${i}`).addEventListener('input',()=>syncOrientation(i,'vertical'));$(`horizontal${i}`).addEventListener('input',()=>syncOrientation(i,'horizontal'))}})}
+function renderCountInputs(){
+    const el=$('countInputs');el.innerHTML='';
+    const defaults=[3,2,1,1];
+    SHAPE_NAMES.forEach((name,i)=>{
+        const div=document.createElement('div');div.className='count-card';
+        div.innerHTML=`<div style="min-width:0;flex:1"><div class="shape-name"><i class="shape-dot" style="background:${SHAPE_COLORS[i]}"></i>${name} 總數</div><input type="number" min="0" max="64" step="1" id="count${i}" value="${defaults[i]}" aria-label="${name}寶藏總數"></div>`;
+        el.appendChild(div);
+    });
+}
 $('startAssist').addEventListener('click',startAssist);$('startTestSetup').addEventListener('click',startTruthSetup);$('loadSave').addEventListener('click',load);$('backSetup').addEventListener('click',()=>{if(confirm('返回設定會離開目前棋盤；請先存檔以保留進度。'))stop()});$('undoBtn').addEventListener('click',undo);$('saveBtn').addEventListener('click',save);$('stopBtn').addEventListener('click',()=>{if(confirm('停止本局？未存檔的進度不會保留。'))stop()});renderCountInputs();
 </script>
 </body>
