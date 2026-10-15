@@ -1,3 +1,4 @@
+這裏是修正後的完整 HTML 程式碼。我已在 cellTreasureTypes 函式中加入了 availableCandidates 檢查，確保「可能寶藏」只會列出周邊實際空間放得下的形狀：
 <!doctype html>
 <html lang="zh-Hant">
 <head>
@@ -213,22 +214,24 @@ function confirmPlacement(shape,mask){
 }
 function markMiss(){if(selected===null||mode!=='assist')return;const s=cloneState(current());s.misses=(BigInt(s.misses)|bit(selected)).toString();pushState(s)}
 function digTest(i){testStats.tries++;let hit=truth.find(t=>has(t.mask,i));if(hit){testStats.hits++;if(testStats.firstHit===null)testStats.firstHit=testStats.tries;const s=cloneState(current());if(!s.found.some(x=>x.mask===hit.mask.toString())){s.found.push({shape:hit.shape,mask:hit.mask.toString()});s.remaining[hit.shape]=Math.max(0,s.remaining[hit.shape]-1)}pushState(s);message=`命中 ${SHAPE_NAMES[hit.shape]}！已自動記錄這個寶藏。`}else{testStats.misses++;const s=cloneState(current());s.misses=(BigInt(s.misses)|bit(i)).toString();pushState(s);message='沒挖到，已記錄為空格。'}render()}
-function undo(){if(mode==='truthSetup'){if(placing){placing=null;render();return}if(truth.length){truth.pop();message='已移除最後放置的寶藏。';render()}return}if(history.length>1){history.pop();if(mode==='test'){// stats are session metrics, recompute approximate from remaining recorded cells
- const s=current();const foundCells=s.found.reduce((n,t)=>n+popcount(BigInt(t.mask)),0);testStats.misses=popcount(BigInt(s.misses));testStats.hits=foundCells;testStats.tries=testStats.misses+foundCells;testStats.firstHit=testStats.hits?testStats.firstHit:null;
+function undo(){if(mode==='truthSetup'){if(placing){placing=null;render();return}if(truth.length){truth.pop();message='已移除最後放置的寶藏。';render()}return}if(history.length>1){history.pop();if(mode==='test'){const s=current();const foundCells=s.found.reduce((n,t)=>n+popcount(BigInt(t.mask)),0);testStats.misses=popcount(BigInt(s.misses));testStats.hits=foundCells;testStats.tries=testStats.misses+foundCells;testStats.firstHit=testStats.hits?testStats.firstHit:null;
 }recompute()}else{message='沒有可復原的步驟。';render()}}
 function stop(){history=[];probs=null;selected=null;placing=null;truth=[];mode='setup';truthSetup=false;$('workspace').classList.add('hidden');$('setupScreen').classList.remove('hidden');$('setupMessage').textContent='已停止本局。需要保留進度請先按「存檔」。'}
 function save(){const payload={version:1,mode,history,truth:truth.map(t=>({shape:t.shape,mask:t.mask.toString()})),truthCounts,testStats};try{localStorage.setItem('treasure-helper-save',JSON.stringify(payload));message='已存檔到此瀏覽器。'}catch(e){message='存檔失敗：瀏覽器儲存空間不可用。'}render()}
 function load(){try{const raw=localStorage.getItem('treasure-helper-save');if(!raw)throw Error('找不到存檔。');const p=JSON.parse(raw);if(!p.history||!p.history.length)throw Error('存檔內容無效。');history=p.history;mode=p.mode||'assist';truth=(p.truth||[]).map(t=>({shape:t.shape,mask:BigInt(t.mask)}));truthCounts=p.truthCounts||[0,0,0,0];testStats=p.testStats||{tries:0,hits:0,misses:0,firstHit:null};truthSetup=mode==='truthSetup';$('setupScreen').classList.add('hidden');$('workspace').classList.remove('hidden');recompute();message='已載入存檔。';render()}catch(e){$('setupMessage').textContent=e.message}}
 function cellDisplay(i,s,best,previewMask){let cls='cell', text='', fill='#6f7d89';const blocked=BigInt(s.misses)|s.found.reduce((b,t)=>b|BigInt(t.mask),0n);const found=s.found.find(t=>has(BigInt(t.mask),i));if(previewMask!==null&&has(previewMask,i)){cls+=' preview';text=SHAPE_NAMES[placing.shape]}else if(found){cls+=' found';fill=SHAPE_COLORS[found.shape];text=SHAPE_NAMES[found.shape]}else if(has(BigInt(s.misses),i)){cls+=' miss';fill='#303943'}else if(mode==='truthSetup'||(mode==='test'&&$('board').classList.contains('show-truth'))){const t=truth.find(t=>has(t.mask,i));if(t){cls+=' truth';fill=SHAPE_COLORS[t.shape];text=SHAPE_NAMES[t.shape]}}
  if(selected===i)cls+=' selected';if(best===i)cls+=' best';if(!truthSetup&&finished()&&!has(blocked,i)&&probs&&probs[i]===1)cls+=' inferred';if(mode==='test'&&has(blocked,i)){}return {cls,text,fill,blocked}}
+
+/* 已修正：加入 availableCandidates 檢查，確保該形狀在該格實際放得下才會列出 */
 function cellTreasureTypes(i){
     if(!probs||!history.length)return[];
     const s=current(), blocked=blockedState(s);
     if(has(blocked,i)||probs[i]<=0)return[];
     return SHAPES.map((_,shape)=>shape)
-        .filter(shape=>s.remaining[shape]>0)
+        .filter(shape=>s.remaining[shape]>0 && availableCandidates(shape, i, blocked).length > 0)
         .map(shape=>SHAPE_NAMES[shape]);
 }
+
 function renderBoard(){const board=$('board');board.innerHTML='';const setup=mode==='truthSetup';let s=history.length?current():{misses:'0',found:[],remaining:truthCounts.slice()};const blocked=setup?truth.reduce((b,t)=>b|t.mask,0n):history.length?blockedState(s):0n;const best=(!setup&&probs&&!finished())?bestCell(probs,blocked):null;const previewMask=placing?(placing.cells||[]).reduce((b,i)=>b|bit(i),0n):null;
  for(let i=0;i<64;i++){const d=cellDisplay(i,s,best,previewMask);const btn=document.createElement('button');btn.className=d.cls;btn.style.backgroundColor=d.fill;const types=cellTreasureTypes(i);const chance=probs&&!setup&&!has(blocked,i)?`${(probs[i]*100).toFixed(1)}%`:'',typeText=types.length?`；可能寶藏：${types.join(' + ')}`:'';btn.title=chance?`估計命中機率 ${chance}${typeText}`:'';btn.setAttribute('aria-label',`第${Math.floor(i/8)+1}列第${i%8+1}行${d.text?`, ${d.text}`:''}${chance?`, 機率 ${chance}${typeText}`:''}`);btn.innerHTML=`<span>${d.text|| (chance?chance:'')}</span><span class="coord">${Math.floor(i/8)+1},${i%8+1}</span>`;if(mode==='test'&&d.blocked){btn.disabled=true;btn.style.opacity='.85'}btn.addEventListener('click',()=>selectCell(i));board.appendChild(btn)} }
 function foundOrientation(t){if(t.shape>1)return null;const mask=BigInt(t.mask);const cells=[];for(let i=0;i<CELLS;i++)if(has(mask,i))cells.push(i);return cells.length>1&&cells.every(i=>i%SIZE===cells[0]%SIZE)?0:1}
@@ -294,3 +297,4 @@ $('startAssist').addEventListener('click',startAssist);$('startTestSetup').addEv
 </script>
 </body>
 </html>
+
