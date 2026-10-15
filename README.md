@@ -69,3 +69,6 @@ GitHub Actions ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs `np
 © 2026 Andy Jiang. Licensed under the [PolyForm Noncommercial License 1.0.0](LICENSE) — non-commercial use, modification, and sharing are permitted (keep the copyright/`Required Notice`); **commercial use is not.**
 
 This is a fan-made tool, not affiliated with or endorsed by the game it references or its publisher; game names and trademarks belong to their respective owners.
+## Direction-specific thin treasures
+
+The setup panel keeps `1×2`, `2×1`, `1×3`, and `3×1` as four separate treasure types. Set their counts in **Direction-specific counts** and choose **Apply direction counts**. The solver does not rotate one of these shapes into its opposite orientation: a `1×3` treasure contributes only to placements that fit `1×3`, never to `3×1` placements. Other rectangular sizes retain the existing rotation-equivalent behavior.

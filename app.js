@@ -250,7 +250,11 @@ function stageLabel(s) { return t("stage.option", { n: s.n, grid: s.grid }); }
 // the picker navigates, and every dynamic string is built through t() afterwards.)
 
 /* ---------- Piece helpers ---------- */
-const key = (w, h) => { const a = Math.min(w, h), b = Math.max(w, h); return a + "x" + b; };
+// Thin treasures 1×2/2×1 and 1×3/3×1 are distinct directional shapes.
+// Other rectangles remain rotation-equivalent to preserve the existing solver behavior.
+const isDirectionalShape = (w, h) => (w === 1 && (h === 2 || h === 3)) || (h === 1 && (w === 2 || w === 3));
+const pieceDims = (w, h) => isDirectionalShape(+w, +h) ? [+w, +h] : [Math.min(+w, +h), Math.max(+w, +h)];
+const key = (w, h) => { const [a, b] = pieceDims(w, h); return a + "x" + b; };
 
 function pieceByKey(k) { return state.pieces.find(p => key(p.w, p.h) === k); }
 
@@ -258,9 +262,10 @@ function addPiece(w, h, c) {
   w = +w; h = +h; c = +c;
   if (!(w >= 1 && h >= 1 && c >= 1)) return;
   const k = key(w, h);
+  const [pw, ph] = pieceDims(w, h);
   const existing = pieceByKey(k);
   if (existing) existing.count += c;
-  else state.pieces.push({ w: Math.min(w, h), h: Math.max(w, h), count: c });
+  else state.pieces.push({ w: pw, h: ph, count: c });
   renderPieceRows();
 }
 
@@ -287,7 +292,7 @@ let currentSet = 0;
 function setDims(set) {
   const out = [];
   set.forEach(([name, count]) => {
-    const [a, b] = sizeOf(name), w = Math.min(a, b), h = Math.max(a, b), k = key(w, h);
+    const [a, b] = sizeOf(name), [w, h] = pieceDims(a, b), k = key(w, h);
     const hit = out.find(p => key(p.w, p.h) === k);
     if (hit) hit.count += count; else out.push({ w, h, count });
   });
@@ -414,19 +419,31 @@ function openSetDialog(s) {
 function renderQuickAdd() {
   const box = $("#quickAdd");
   box.innerHTML = "";
-  // unique sizes
-  const seen = new Set();
-  TREASURES.forEach(([name, w, h]) => {
+  const options = [[1, 2], [2, 1], [1, 3], [3, 1]];
+  const seenSizes = new Set(options.map(([w, h]) => key(w, h)));
+  TREASURES.forEach(([, w, h]) => {
+    const [pw, ph] = pieceDims(w, h), k = key(pw, ph);
+    if (!seenSizes.has(k)) { options.push([pw, ph]); seenSizes.add(k); }
+  });
+  const rendered = new Set();
+  options.forEach(([w, h]) => {
     const k = key(w, h);
-    if (seen.has(k)) return; seen.add(k);
+    if (rendered.has(k)) return;
+    rendered.add(k);
     const b = document.createElement("button");
-    b.textContent = `${Math.min(w,h)}×${Math.max(w,h)}`;
+    b.textContent = `${w}×${h}`;
+    b.title = `新增 ${w}×${h} 寶藏`;
     b.onclick = () => { addPiece(w, h, 1); markCustom(); saveBoard(); };
     box.appendChild(b);
   });
 }
 
 function renderPieceRows() {
+  // Keep the four directional count controls synchronized with the actual stage model.
+  [[1, 2, "dirCount1x2"], [2, 1, "dirCount2x1"], [1, 3, "dirCount1x3"], [3, 1, "dirCount3x1"]].forEach(([w, h, id]) => {
+    const el = $("#" + id);
+    if (el) { const p = pieceByKey(key(w, h)); el.value = p ? p.count : 0; }
+  });
   const tb = $("#pieceRows");
   tb.innerHTML = "";
   if (!state.pieces.length) {
@@ -469,7 +486,7 @@ function clearDigs() {
 // The board is plain JSON (grid size, the stage's pieces, every cell), so it
 // round-trips through localStorage as-is. Saved on every recompute() and on the
 // piece edits that don't trigger one. Bump SAVE_V whenever the shape changes.
-const SAVE_KEY = "th.board", SAVE_V = 1;
+const SAVE_KEY = "th.board", SAVE_V = 2;
 
 function saveBoard() {
   if (!state.cells.length) return;        // board not built yet, nothing worth saving
@@ -614,7 +631,7 @@ const DP_STATE_BUDGET = 1500000;
 function buildPlacements(N, blocked, w, h) {
   // returns array of Int32Array (cell indices) for both orientations, fully on free cells
   const out = [];
-  const orients = (w === h) ? [[w, h]] : [[w, h], [h, w]];
+  const orients = (w === h || isDirectionalShape(w, h)) ? [[w, h]] : [[w, h], [h, w]];
   for (const [pw, ph] of orients) {
     for (let r = 0; r + ph <= N; r++) {
       for (let c = 0; c + pw <= N; c++) {
@@ -791,7 +808,7 @@ function bombEnabled() {
 function dpSolve(N, blocked, types) {
   const M = N * N, T = types.length;
   if (T === 0) return { cover: new Float64Array(M), total: 1 };
-  const oris = types.map(t => (t.w === t.h) ? [[t.w, t.h]] : [[t.w, t.h], [t.h, t.w]]);
+  const oris = types.map(t => (t.w === t.h || isDirectionalShape(t.w, t.h)) ? [[t.w, t.h]] : [[t.w, t.h], [t.h, t.w]]);
   let Hmax = 1; for (const t of types) Hmax = Math.max(Hmax, t.w, t.h);
   const PB = Hmax, Pmax = Math.pow(PB, N);
   const countRadix = types.map(t => t.rem + 1);
@@ -1567,61 +1584,18 @@ function clearItem(id) {
 function setDug(i, val) { state.cells[i].dug = val; recompute(); }
 
 
-/* ---------- Orientation-specific shape-only Monte Carlo analysis ----------
-   Deliberately separate from state.pieces: 1x2, 2x1, 1x3 and 3x1 are four
-   independent settings, and each run considers only the selected orientation.
-   Rejection-sampling uniformly selected placement subsets gives every valid
-   non-overlapping subset the same probability of being proposed. */
-function runShapeOnlyProbability() {
-  const shape = $("#shapeProbSelect").value;
-  const [w, h] = shape.split("x").map(Number);
-  const count = Math.max(0, Math.min(20, Number($("#shapeCount" + shape).value) || 0));
-  const N = state.N, M = N * N;
-  const blocked = new Uint8Array(M);
-  state.cells.forEach((c, i) => { if (c.status !== "hidden") blocked[i] = 1; });
-  const placements = [];
-  for (let r = 0; r + h <= N; r++) for (let c = 0; c + w <= N; c++) {
-    const cells = []; let valid = true;
-    for (let dy = 0; dy < h && valid; dy++) for (let dx = 0; dx < w; dx++) {
-      const idx = (r + dy) * N + c + dx;
-      if (blocked[idx]) { valid = false; break; }
-      cells.push(idx);
-    }
-    if (valid) placements.push(cells);
-  }
-  const out = $("#shapeProbOut");
-  if (count === 0) { out.textContent = `形狀 ${shape} 的數量為 0，無法計算。 / Count for ${shape} is 0.`; return; }
-  if (placements.length < count) { out.textContent = `可用位置不足：${shape} 需要 ${count} 個，但只有 ${placements.length} 個候選位置。 / Not enough placements.`; return; }
-  const cover = new Float64Array(M);
-  const MAX_TRIALS = 60000, MAX_MS = 250;
-  let tried = 0, success = 0;
-  const start = performance.now();
-  const indices = placements.map((_, i) => i);
-  const occupied = new Uint8Array(M);
-  while (tried < MAX_TRIALS && performance.now() - start < MAX_MS) {
-    tried++;
-    // A uniformly random subset of `count` distinct placements.
-    for (let i = 0; i < count; i++) {
-      const j = i + ((Math.random() * (indices.length - i)) | 0);
-      [indices[i], indices[j]] = [indices[j], indices[i]];
-    }
-    occupied.fill(0); let ok = true;
-    for (let i = 0; i < count && ok; i++) {
-      const cells = placements[indices[i]];
-      for (const idx of cells) if (occupied[idx]) { ok = false; break; }
-      if (ok) for (const idx of cells) occupied[idx] = 1;
-    }
-    if (ok) { success++; for (let i = 0; i < M; i++) if (occupied[i]) cover[i]++; }
-    // Restore the index array to a stable order; each next trial shuffles it.
-    if ((tried & 1023) === 0 && success > 0 && performance.now() - start > MAX_MS) break;
-  }
-  if (!success) { out.textContent = `抽樣中沒有找到有效配置（${tried} 次）。請減少 ${shape} 數量或清除更多已挖格。 / No valid layout found.`; return; }
-  const ranked = [];
-  for (let i = 0; i < M; i++) if (!blocked[i]) ranked.push({ i, p: cover[i] / success });
-  ranked.sort((a, b) => b.p - a.p || a.i - b.i);
-  const rows = ranked.slice(0, 10).map((x, rank) => `<tr><td>${rank + 1}</td><td>R${Math.floor(x.i / N) + 1} C${x.i % N + 1}</td><td>${(x.p * 100).toFixed(2)}%</td></tr>`).join("");
-  out.innerHTML = `<div><b>${shape}</b>｜成功樣本 ${success.toLocaleString()} / 嘗試 ${tried.toLocaleString()}｜僅計算此方向與尺寸</div>` +
-    `<div class="shape-prob-results"><table><thead><tr><th>排名</th><th>位置</th><th>機率</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+function applyDirectionalCounts() {
+  const directional = [[1, 2, "dirCount1x2"], [2, 1, "dirCount2x1"], [1, 3, "dirCount1x3"], [3, 1, "dirCount3x1"]];
+  // Replace only these four orientations; all other treasure sizes stay unchanged.
+  state.pieces = state.pieces.filter(p => !isDirectionalShape(p.w, p.h));
+  directional.forEach(([w, h, id]) => {
+    const count = Math.max(0, Math.min(20, Number($("#" + id).value) || 0));
+    if (count > 0) state.pieces.push({ w, h, count });
+  });
+  renderPieceRows();
+  markCustom();
+  recompute();
+  saveBoard();
 }
 
 /* ---------- Wiring ---------- */
@@ -1649,6 +1623,7 @@ if (setDialog) {
 $("#gridSize").addEventListener("input", e => { $("#gridSizeEcho").textContent = e.target.value; markCustom(); saveBoard(); });
 $("#pickPerTile").addEventListener("input", saveBoard);
 $("#addPiece").onclick = () => { addPiece($("#newW").value, $("#newH").value, $("#newC").value); markCustom(); saveBoard(); };
+$("#applyDirectionalCounts").onclick = applyDirectionalCounts;
 $("#newGame").onclick = newGame;
 $("#clearDigs").onclick = clearDigs;
 $("#estimate").onclick = runEstimate;
@@ -1726,15 +1701,6 @@ initLangPicker();
 // On a prerendered page this re-applies the language the HTML already shipped in, so there is nothing
 // to repaint and no flash. On the root it is the auto-detect swap: English markup into the detected
 // language, before the board is built.
-try { $("#shapeProbRun").onclick = runShapeOnlyProbability; } catch (_) {}
-try {
-  ["1x2", "2x1", "1x3", "3x1"].forEach(k => {
-    const el = $("#shapeCount" + k);
-    const saved = localStorage.getItem("th.shapeCount." + k);
-    if (saved !== null) el.value = saved;
-    el.addEventListener("change", () => { try { localStorage.setItem("th.shapeCount." + k, el.value); } catch (_) {} });
-  });
-} catch (_) {}
 applyStaticI18n();
 try { $("#dpToggle").checked = (localStorage.getItem("th.dp") ?? "1") !== "0"; }
 catch (_) { $("#dpToggle").checked = true; }   // default ON; persisted opt-out
