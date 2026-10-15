@@ -135,6 +135,7 @@
   button.danger { color: #ff8a8a; }
   .quick-add { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
   .quick-add button { font-size: 12px; padding: 4px 7px; }
+  .quick-add button.selected { border-color: var(--accent); background: var(--accent); color: #1a1a1a; font-weight: 600; }
   table.pieces { width: 100%; border-collapse: collapse; font-size: 13px; }
   table.pieces th { text-align: left; color: var(--muted); font-weight: 500; padding: 4px 6px; }
   table.pieces td { padding: 3px 6px; border-top: 1px solid var(--line); }
@@ -179,12 +180,8 @@
      on the dark empty tile (13.8:1), dark on the light gold (8.7:1). The ⛏ lies
      across both hatch stripes, so the darker stripe sets the floor there (5.3:1). */
   .cell.empty { background: var(--empty); color: var(--ink-light); cursor: pointer; }
-  .cell.item  { background: var(--item); color: var(--ink-dark); }   /* dug-out treasure (solid) */
-  .cell.item.buried {                                                /* located but not dug yet */
-    background-color: var(--item);                                   /* lerps from the heat colour */
-    background-image: repeating-linear-gradient(45deg, transparent 0 5px, #9b7b29 5px 10px);
-    color: var(--ink-dark);
-  }
+  .cell.item  { background-color: var(--item); color: var(--ink-dark); }   /* each treasure gets its own color inline */
+  .cell.item.buried { background-image: repeating-linear-gradient(45deg, transparent 0 5px, rgba(0,0,0,.25) 5px 10px); }
   .cell .sub { position: absolute; bottom: 2px; right: 4px; font-size: .7em; font-weight: 500; opacity: .8; }
   .cell .star { position: absolute; top: 1px; left: 3px; font-size: .77em; color: #fff; text-shadow: 0 0 3px #000; }
   .cell.best { border-color: #fff; box-shadow: 0 0 0 2px #fff, 0 0 10px 2px rgba(255,255,255,.55); z-index: 1; }
@@ -322,15 +319,3 @@
   }
 
 
-/* Independent, orientation-specific shape probability panel */
-.shape-prob-panel { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border, #ddd); }
-.shape-prob-panel h3 { margin: 0 0 6px; font-size: 15px; }
-.shape-counts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin: 10px 0; }
-.shape-counts label { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 13px; }
-.shape-counts input { width: 66px; min-width: 0; }
-.shape-run-row { align-items: end; gap: 8px; flex-wrap: wrap; }
-.shape-run-row label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
-.shape-prob-results { margin-top: 8px; }
-.shape-prob-results table { width: 100%; border-collapse: collapse; font-size: 13px; }
-.shape-prob-results th, .shape-prob-results td { text-align: left; padding: 4px 6px; border-bottom: 1px solid var(--border, #ddd); }
-@media (max-width: 720px) { .shape-counts { grid-template-columns: repeat(2, minmax(0, 1fr)); } }

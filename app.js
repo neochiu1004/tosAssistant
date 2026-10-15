@@ -432,18 +432,18 @@ function renderQuickAdd() {
     rendered.add(k);
     const b = document.createElement("button");
     b.textContent = `${w}×${h}`;
-    b.title = `新增 ${w}×${h} 寶藏`;
-    b.onclick = () => { addPiece(w, h, 1); markCustom(); saveBoard(); };
+    b.title = `選擇 ${w}×${h} 尺寸`;
+    b.type = "button";
+    b.onclick = () => {
+      $("#newSize").value = `${w}x${h}`;
+      box.querySelectorAll("button").forEach(x => x.classList.toggle("selected", x === b));
+      $("#newC").focus();
+    };
     box.appendChild(b);
   });
 }
 
 function renderPieceRows() {
-  // Keep the four directional count controls synchronized with the actual stage model.
-  [[1, 2, "dirCount1x2"], [2, 1, "dirCount2x1"], [1, 3, "dirCount1x3"], [3, 1, "dirCount3x1"]].forEach(([w, h, id]) => {
-    const el = $("#" + id);
-    if (el) { const p = pieceByKey(key(w, h)); el.value = p ? p.count : 0; }
-  });
   const tb = $("#pieceRows");
   tb.innerHTML = "";
   if (!state.pieces.length) {
@@ -1212,7 +1212,12 @@ function recompute() {
       // located treasure: ⛏ buried (hatched, still to dig) vs ✓ dug-out (solid)
       el.className = "cell item" + (c.dug ? "" : " buried");
       el.innerHTML = `${c.dug ? "✓" : "⛏"}<span class="sub">${c.type}</span>`;
-      el.style.background = ""; el.style.color = "";
+      const treasureColors = ["#f4c95d", "#79c7ff", "#b7e4a8", "#e7a8df", "#ffa987", "#a9b5ff", "#7ddbd2", "#f3a6b8", "#d6b4fc", "#c5e1a5"];
+      const color = treasureColors[(Math.max(1, c.itemId) - 1) % treasureColors.length];
+      el.style.background = "";
+      el.style.backgroundColor = color;
+      el.style.backgroundImage = c.dug ? "none" : "repeating-linear-gradient(45deg, transparent 0 5px, rgba(0,0,0,.25) 5px 10px)";
+      el.style.color = "#202020";
       continue;
     }
     // hidden
@@ -1584,19 +1589,6 @@ function clearItem(id) {
 function setDug(i, val) { state.cells[i].dug = val; recompute(); }
 
 
-function applyDirectionalCounts() {
-  const directional = [[1, 2, "dirCount1x2"], [2, 1, "dirCount2x1"], [1, 3, "dirCount1x3"], [3, 1, "dirCount3x1"]];
-  // Replace only these four orientations; all other treasure sizes stay unchanged.
-  state.pieces = state.pieces.filter(p => !isDirectionalShape(p.w, p.h));
-  directional.forEach(([w, h, id]) => {
-    const count = Math.max(0, Math.min(20, Number($("#" + id).value) || 0));
-    if (count > 0) state.pieces.push({ w, h, count });
-  });
-  renderPieceRows();
-  markCustom();
-  recompute();
-  saveBoard();
-}
 
 /* ---------- Wiring ---------- */
 // Hand-edited pieces are no stage's set, so the label and the chooser go together.
@@ -1622,8 +1614,23 @@ if (setDialog) {
 }
 $("#gridSize").addEventListener("input", e => { $("#gridSizeEcho").textContent = e.target.value; markCustom(); saveBoard(); });
 $("#pickPerTile").addEventListener("input", saveBoard);
-$("#addPiece").onclick = () => { addPiece($("#newW").value, $("#newH").value, $("#newC").value); markCustom(); saveBoard(); };
-$("#applyDirectionalCounts").onclick = applyDirectionalCounts;
+function populateSizeSelector() {
+  const select = $("#newSize");
+  if (!select) return;
+  const dims = [[1,2],[2,1],[1,3],[3,1]];
+  const seen = new Set(dims.map(([w,h]) => `${w}x${h}`));
+  TREASURES.forEach(([,w,h]) => {
+    const [pw,ph] = pieceDims(w,h), v = `${pw}x${ph}`;
+    if (!seen.has(v)) { dims.push([pw,ph]); seen.add(v); }
+  });
+  select.innerHTML = dims.map(([w,h]) => `<option value="${w}x${h}">${w}×${h}</option>`).join("");
+}
+populateSizeSelector();
+$("#addPiece").onclick = () => {
+  const [w,h] = $("#newSize").value.split("x").map(Number);
+  const count = Math.max(1, Math.min(20, Number($("#newC").value) || 1));
+  addPiece(w, h, count); markCustom(); saveBoard(); recompute();
+};
 $("#newGame").onclick = newGame;
 $("#clearDigs").onclick = clearDigs;
 $("#estimate").onclick = runEstimate;
