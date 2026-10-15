@@ -1,4 +1,3 @@
-這裏是修正後的完整 HTML 程式碼。我已在 cellTreasureTypes 函式中加入了 availableCandidates 檢查，確保「可能寶藏」只會列出周邊實際空間放得下的形狀：
 <!doctype html>
 <html lang="zh-Hant">
 <head>
@@ -77,24 +76,24 @@ footer { max-width:1200px; margin:20px auto 0; color:var(--muted); font-size:12p
 </head>
 <body>
 <div id="app">
-<header><div class="brand"><div class="logo">✦</div><div><h1>寶藏小助手</h1><div class="subtitle">8 × 8 尋寶機率估算 · 網頁測試版</div></div></div><div class="pill">原版 Rust 邏輯移植 · 本機儲存</div></header>
+<header><div class="brand"><div class="logo">✦</div><div><h1>寶藏小助手</h1><div class="subtitle">8 × 8 尋寶機率估算 · 網頁測試版[span_1](start_span)[span_1](end_span)</div></div></div><div class="pill">原版 Rust 邏輯移植 · 本機儲存[span_2](start_span)[span_2](end_span)</div></header>
 <main>
 <section id="setupScreen" class="panel setup">
-<div class="eyebrow">New session</div><h2>設定這局的寶藏數量</h2><p>支援 1×2、1×3、2×2、3×3 四種類型，分別占用 2、3、4、9 格。寶藏可分布於任意格子，不要求相鄰。開始後可手動記錄結果，或設定測試答案來驗證推薦準確度。</p>
+<div class="eyebrow">New session</div><h2>設定這局的寶藏數量</h2><p>支援 1×2、1×3、2×2、3×3 四種類型，分別占用 2、3、4、9 格。寶藏可分布於任意格子，不要求相鄰。開始後可手動記錄結果，或設定測試答案來驗證推薦準確度[span_3](start_span)[span_3](end_span)。</p>
 <div class="count-grid" id="countInputs"></div>
 <div class="actions"><button class="primary" id="startAssist">開始輔助</button><button id="startTestSetup">設定寶藏位置並測試</button><button id="loadSave">載入存檔</button></div>
-<div id="setupMessage" class="note">測試模式會先讓你設定真實寶藏位置，正式測試時棋盤會隱藏答案；每次挖掘都會自動對照答案並更新推薦。</div>
+<div id="setupMessage" class="note">測試模式會先讓你設定真實寶藏位置，正式測試時棋盤會隱藏答案；每次挖掘都會自動對照答案並更新推薦[span_4](start_span)[span_4](end_span)。</div>
 </section>
 <section id="workspace" class="workspace hidden">
 <div class="panel board-panel"><div class="board-head"><div><div class="eyebrow" id="modeEyebrow">Assistant mode</div><h2 id="boardTitle">尋寶棋盤</h2><p id="boardHint">點選格子，再輸入空格或找到的寶藏。</p></div><button class="small" id="backSetup">返回設定</button></div><div id="board" class="board" aria-label="8乘8尋寶棋盤"></div><div class="legend"><span><i class="swatch" style="color:#d94b50"></i>推薦位置</span><span><i class="swatch" style="color:#fff"></i>選取格</span><span><i class="swatch" style="color:#43a66b"></i>推斷位置</span><span><i class="swatch" style="color:#c8ad36"></i>擺放預覽</span><span><i class="swatch" style="color:#7c83ff"></i>測試答案（設定時）</span></div></div>
 <aside class="side">
 <div class="panel"><h3>剩餘寶藏</h3><div id="remainingList"></div><div id="status" class="status" style="margin-top:12px">請開始設定。</div><div class="metrics" id="metrics"></div></div>
 <div class="panel" id="interactionPanel"><h3>操作</h3><div id="interactionContent"></div></div>
-<div class="panel"><h3>進度管理</h3><div class="control-group"><button id="undoBtn">上一步</button><button id="saveBtn">存檔</button><button id="stopBtn">停止</button></div><div class="note">存檔保存在此瀏覽器的 localStorage，不會寫入 GitHub 或伺服器。清除瀏覽器網站資料會刪除存檔。</div></div>
+<div class="panel"><h3>進度管理</h3><div class="control-group"><button id="undoBtn">上一步</button><button id="saveBtn">存檔</button><button id="stopBtn">停止</button></div><div class="note">存檔保存在此瀏覽器的 localStorage，不會寫入 GitHub 或伺服器。清除瀏覽器網站資料會刪除存檔[span_5](start_span)[span_5](end_span)。</div></div>
 </aside>
 </section>
 </main>
-<footer>機率為有限次抽樣估算，與原版一致採固定亂數種子；結果不保證命中。網頁預覽不會連接或操作實際遊戲。</footer>
+<footer>機率為有限次抽樣估算，與原版一致採固定亂數種子；結果不保證命中。網頁預覽不會連接或操作實際遊戲[span_6](start_span)[span_6](end_span)。</footer>
 </div>
 <script>
 'use strict';
@@ -105,39 +104,126 @@ function bit(i){return 1n<<BigInt(i)}
 function has(mask,i){return (mask&bit(i))!==0n}
 function popcount(x){let n=0;while(x){x&=x-1n;n++}return n}
 function shapeArea(s){return SHAPES[s][0]*SHAPES[s][1]}
+
 function positions(shape){const [h,w]=SHAPES[shape], out=[];for(const [hh,ww] of [[h,w],[w,h]])for(let r=0;r<=SIZE-hh;r++)for(let c=0;c<=SIZE-ww;c++){let m=0n;for(let y=r;y<r+hh;y++)for(let x=c;x<c+ww;x++)m|=bit(y*SIZE+x);out.push(m)}return [...new Set(out.map(String))].map(BigInt).sort((a,b)=>a<b?-1:a>b?1:0)}
 function positionsOrientation(shape,orientation){const [h,w]=SHAPES[shape],hh=orientation===0?Math.max(h,w):Math.min(h,w),ww=orientation===0?Math.min(h,w):Math.max(h,w),out=[];for(let r=0;r<=SIZE-hh;r++)for(let c=0;c<=SIZE-ww;c++){let m=0n;for(let y=r;y<r+hh;y++)for(let x=c;x<c+ww;x++)m|=bit(y*SIZE+x);out.push(m)}return out}
+
 class RNG{constructor(seed){this.x=seed||1n}next(){this.x=BigInt.asUintN(64,this.x^(this.x>>12n));this.x=BigInt.asUintN(64,this.x^(this.x<<25n));this.x=BigInt.asUintN(64,this.x^(this.x>>27n));return BigInt.asUintN(64,this.x*0x2545F4914F6CDD1Dn)}shuffle(a){for(let i=a.length-1;i>0;i--){const j=Number(this.next()%BigInt(i+1));[a[i],a[j]]=[a[j],a[i]]}}}
-function sampleBoard(all,remaining,blocked,rng){
-    const free=[];
-    for(let i=0;i<CELLS;i++) if(!has(blocked,i)) free.push(i);
-    const required=remaining.reduce((sum,count,shape)=>sum+count*shapeArea(shape),0);
-    if(required>free.length) return null;
-    rng.shuffle(free);
-    const board=[]; let cursor=0;
-    for(let shape=0;shape<SHAPES.length;shape++){
-        for(let n=0;n<remaining[shape];n++){
-            let mask=0n;
-            for(let j=0;j<shapeArea(shape);j++) mask|=bit(free[cursor++]);
-            board.push({shape,mask});
+
+/* 新增：根據方向與已封鎖格嚴格取得合法候選遮罩 */
+function getValidMasks(shape, currentBlocked, remainingOrients) {
+    const [h, w] = SHAPES[shape];
+    const out = [];
+    if (shape >= 2) {
+        const hh = h, ww = w;
+        for (let r = 0; r <= SIZE - hh; r++) {
+            for (let c = 0; c <= SIZE - ww; c++) {
+                let m = 0n;
+                let valid = true;
+                for (let y = r; y < r + hh; y++) {
+                    for (let x = c; x < c + ww; x++) {
+                        const idx = y * SIZE + x;
+                        if (has(currentBlocked, idx)) { valid = false; break; }
+                        m |= bit(idx);
+                    }
+                    if (!valid) break;
+                }
+                if (valid) out.push(m);
+            }
+        }
+        return [...new Set(out.map(String))].map(BigInt);
+    }
+    const [allowVertical, allowHorizontal] = remainingOrients;
+    const orientations = [];
+    if (allowVertical > 0) orientations.push([Math.max(h, w), Math.min(h, w)]);
+    if (allowHorizontal > 0) orientations.push([Math.min(h, w), Math.max(h, w)]);
+
+    for (const [hh, ww] of orientations) {
+        for (let r = 0; r <= SIZE - hh; r++) {
+            for (let c = 0; c <= SIZE - ww; c++) {
+                let m = 0n;
+                let valid = true;
+                for (let y = r; y < r + hh; y++) {
+                    for (let x = c; x < c + ww; x++) {
+                        const idx = y * SIZE + x;
+                        if (has(currentBlocked, idx)) { valid = false; break; }
+                        m |= bit(idx);
+                    }
+                    if (!valid) break;
+                }
+                if (valid) out.push(m);
+            }
         }
     }
-    return board;
+    return [...new Set(out.map(String))].map(BigInt);
 }
-function probabilities(remaining,blocked){
-    const rng=new RNG(SEED), counts=Array(CELLS).fill(0);
-    let successful=0;
-    for(let n=0;n<SAMPLES;n++){
-        const board=sampleBoard(null,remaining,blocked,rng);
-        if(!board) continue;
-        successful++;
-        let occupied=0n;
-        for(const item of board) occupied|=item.mask;
-        for(let i=0;i<CELLS;i++) if(has(occupied,i)) counts[i]++;
+
+/* 改良版機率計算：納入幾何限制與直橫方向消耗追蹤 */
+function probabilities(remaining, blocked){
+    const counts = Array(CELLS).fill(0);
+    let successful = 0;
+    const rng = new RNG(SEED);
+
+    for(let n=0; n<SAMPLES; n++){
+        let currentBlocked = blocked;
+        let possible = true;
+        const placedItems = [];
+
+        let simOrientations = [
+            remainingOrientations(0) || [0, 0],
+            remainingOrientations(1) || [0, 0]
+        ];
+
+        const shapeOrder = [];
+        remaining.forEach((count, shape)=>{
+            for(let c=0; c<count; c++) shapeOrder.push(shape);
+        });
+        rng.shuffle(shapeOrder);
+
+        for(const shape of shapeOrder){
+            let validMasks = [];
+            if(shape < 2){
+                validMasks = getValidMasks(shape, currentBlocked, simOrientations[shape]);
+            } else {
+                validMasks = getValidMasks(shape, currentBlocked, null);
+            }
+
+            const available = validMasks.filter(m => (m & currentBlocked) === 0n);
+            if(available.length === 0){
+                possible = false;
+                break;
+            }
+
+            const chosen = available[Number(rng.next() % BigInt(available.length))];
+            currentBlocked |= chosen;
+            placedItems.push({ shape, mask: chosen });
+
+            if(shape < 2){
+                const cells = [];
+                for(let i=0; i<CELLS; i++) if(has(chosen, i)) cells.push(i);
+                const isVertical = cells.length > 1 && cells.every(i => i % SIZE === cells[0] % SIZE);
+                if(isVertical){
+                    simOrientations[shape][0] = Math.max(0, simOrientations[shape][0] - 1);
+                } else {
+                    simOrientations[shape][1] = Math.max(0, simOrientations[shape][1] - 1);
+                }
+            }
+        }
+
+        if(possible){
+            successful++;
+            let occupied = 0n;
+            for(const item of placedItems) occupied |= item.mask;
+            for(let i=0; i<CELLS; i++){
+                if(has(occupied, i)) counts[i]++;
+            }
+        }
     }
+
     if(!successful) return null;
-    return counts.map(c=>c/successful);
+    return counts.map(c => c / successful);
 }
+
 function bestCell(p,blocked){let best=null;for(let i=0;i<CELLS;i++)if(!has(blocked,i)&&(best===null||p[i]>p[best]))best=i;return best}
 function blockedState(s){return s.found.reduce((b,x)=>b|BigInt(x.mask),BigInt(s.misses))}
 function current(){return history[history.length-1]}
@@ -222,7 +308,6 @@ function load(){try{const raw=localStorage.getItem('treasure-helper-save');if(!r
 function cellDisplay(i,s,best,previewMask){let cls='cell', text='', fill='#6f7d89';const blocked=BigInt(s.misses)|s.found.reduce((b,t)=>b|BigInt(t.mask),0n);const found=s.found.find(t=>has(BigInt(t.mask),i));if(previewMask!==null&&has(previewMask,i)){cls+=' preview';text=SHAPE_NAMES[placing.shape]}else if(found){cls+=' found';fill=SHAPE_COLORS[found.shape];text=SHAPE_NAMES[found.shape]}else if(has(BigInt(s.misses),i)){cls+=' miss';fill='#303943'}else if(mode==='truthSetup'||(mode==='test'&&$('board').classList.contains('show-truth'))){const t=truth.find(t=>has(t.mask,i));if(t){cls+=' truth';fill=SHAPE_COLORS[t.shape];text=SHAPE_NAMES[t.shape]}}
  if(selected===i)cls+=' selected';if(best===i)cls+=' best';if(!truthSetup&&finished()&&!has(blocked,i)&&probs&&probs[i]===1)cls+=' inferred';if(mode==='test'&&has(blocked,i)){}return {cls,text,fill,blocked}}
 
-/* 已修正：加入 availableCandidates 檢查，確保該形狀在該格實際放得下才會列出 */
 function cellTreasureTypes(i){
     if(!probs||!history.length)return[];
     const s=current(), blocked=blockedState(s);
